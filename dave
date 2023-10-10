@@ -1,0 +1,161 @@
+#!/bin/sh
+
+# launch failed: Remote "" is unknown or unreachable.
+# https://github.com/canonical/multipass/issues/1853
+# sudo snap restart multipass.multipassd
+
+set -xe
+
+INSTANCE_NAME="dave"
+USERNAME="$(id -un)"
+
+# The following makes this script self contained
+LAUNCH_YAML=$(
+cat <<'EOF'
+#cloud-config
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: false
+
+users:
+  - name: @USERNAME@
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    lock_passwd: true
+    homedir: /home/@USERNAME@
+
+packages:
+  - curl
+  - exfat-fuse  # for appimages
+  - git
+  - gnome-keyring
+  - iproute2
+  - jq
+  - rsync
+  - socat
+  - sysstat
+  - vim
+
+snap:
+  commands:
+    - snap install lxd
+    - snap install docker
+    - snap install terraform --classic
+    - snap install juju-wait --classic
+    - snap install charmcraft --classic
+    - snap install rockcraft --classic --edge
+    - snap install yq
+
+write_files:
+- content: |
+    #!/bin/sh
+    set -xe
+    USERNAME="$(id -un)"
+    [ -n "$1" ] && CHANNEL="$1" || CHANNEL="1.27-strict/stable"
+    sudo snap remove --purge microk8s
+    sudo snap install microk8s --channel="$CHANNEL"
+    mkdir -p "/home/$USERNAME/.kube"
+    sudo adduser "$USERNAME" snap_microk8s
+    sudo chown -f -R "$USERNAME" "/home/$USERNAME/.kube"
+    sudo snap alias microk8s.kubectl kubectl
+    sudo microk8s.enable dns
+    sudo microk8s.kubectl rollout status deployments/coredns -n kube-system -w --timeout=600s
+    sudo microk8s.enable hostpath-storage
+    sudo microk8s.enable ingress
+    sudo microk8s.kubectl rollout status deployments/hostpath-provisioner -n kube-system -w --timeout=600s
+    sudo microk8s.kubectl rollout status daemonsets/nginx-ingress-microk8s-controller -n ingress -w --timeout=600s
+    sudo microk8s.enable rbac
+    sudo microk8s.enable registry
+    IPADDR=$(ip -4 -j route get 2.2.2.2 | jq -r '.[] | .prefsrc')
+    sudo microk8s enable "metallb:$IPADDR-$IPADDR"
+    sudo microk8s start
+    sudo microk8s config > "/home/$USERNAME/.kube/config"
+  path: /usr/local/bin/reset_microk8s
+  permissions: '0755'
+- content: |
+    #!/bin/sh
+    set -xe
+    USERNAME="$(id -un)"
+    [ -n "$1" ] && CHANNEL="$1" || CHANNEL="3.1"
+    sudo snap remove --purge juju
+    rm -rf "/home/$USERNAME/.local/share/juju"
+    sudo snap install juju --classic --channel="$CHANNEL"
+    sg snap_microk8s -c "juju update-public-clouds --client"
+    sg snap_microk8s -c "juju update-k8s --client microk8s"
+    sg snap_microk8s -c "juju bootstrap microk8s mk8s --verbose --show-log"
+    sg snap_microk8s -c "juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'"
+    sg snap_microk8s -c "juju add-model dev"
+  path: /usr/local/bin/reset_juju
+  permissions: '0755'
+
+runcmd:
+  - |
+    # disable swap
+    sysctl -w vm.swappiness=0
+    echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
+    swapoff -a
+
+  - |
+    # disable unnecessary services
+    systemctl disable man-db.timer man-db.service --now
+    systemctl disable apport.service apport-autoreport.service  --now
+    systemctl disable apt-daily.service apt-daily.timer --now
+    systemctl disable apt-daily-upgrade.service apt-daily-upgrade.timer --now
+    systemctl disable unattended-upgrades.service --now
+    systemctl disable motd-news.service motd-news.timer --now
+    systemctl disable bluetooth.target --now
+    systemctl disable ua-messaging.service ua-messaging.timer --now
+    systemctl disable ua-timer.timer ua-timer.service --now
+    systemctl disable systemd-tmpfiles-clean.timer --now
+
+  - |
+    # apt cleanup
+    apt remove -y landscape-client landscape-common
+    apt-get autoremove -y
+
+  - |
+    # setup docker
+    addgroup --system docker
+    adduser @USERNAME@ docker
+    snap disable docker
+    snap enable docker
+    iptables-legacy -I DOCKER-USER -j ACCEPT
+
+  - |
+    # setup charmcraft
+    lxd init --auto
+    adduser @USERNAME@ lxd
+EOF
+)
+
+
+if [ "$1" = "--clean" ]; then
+  printf 'Are you sure (y/n)? '
+  read -r answer
+  if [ "$answer" != "${answer#[Yy]}" ] ;then
+    if multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
+      multipass delete "$INSTANCE_NAME"
+      multipass purge
+    fi
+  fi
+fi
+
+if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
+  # We're purging to remove the instance if it was deleted
+  multipass purge
+  # We're creating the temporary file in $HOME to be sure 
+  # that multipass as a snap can read it
+  launch_file="$(mktemp -p "$HOME")"
+  echo "$LAUNCH_YAML" > "$launch_file"
+  sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
+  # The low timeout is low so that we get control again relatively fast.
+  # Of course, the VM will probably not have everything started yet.
+  # That's why we mark this operation as a success even if it times out.
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G --timeout 120 || true
+  multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME"
+  rm "$launch_file"
+fi
+
+multipass start "$INSTANCE_NAME"
+multipass exec "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
