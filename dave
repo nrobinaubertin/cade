@@ -41,11 +41,8 @@ snap:
   commands:
     - snap install lxd
     - snap install docker
-    - snap install terraform --classic
-    - snap install juju-wait --classic
     - snap install charmcraft --classic
     - snap install rockcraft --classic --edge
-    - snap install yq
 
 write_files:
 - content: |
