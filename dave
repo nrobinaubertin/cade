@@ -82,6 +82,21 @@ write_files:
     sg snap_microk8s -c "juju add-model dev"
   path: /usr/local/bin/reset_juju
   permissions: '0755'
+- content: |
+    #!/bin/sh
+    build_dir="$(mktemp -d -p "$HOME")"
+    cd "$build_dir"
+    git clone --depth 1 --branch "juju-$1" https://github.com/juju/juju.git .
+    sudo snap install snapcraft --classic
+    snapcraft --use-lxd
+    sudo snap install *.snap --dangerous
+    sudo snap connect juju:lxd lxd
+    sudo snap connect juju:config-lxd
+    sudo snap connect juju:dot-local-share-juju
+    sudo snap connect juju:ssh-keys
+    rm -rf "$build_dir"
+  path: /usr/local/bin/build_juju
+  permissions: '0755'
 
 runcmd:
   - |
