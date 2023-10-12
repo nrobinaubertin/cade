@@ -157,5 +157,10 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   rm "$launch_file"
 fi
 
-multipass start "$INSTANCE_NAME"
-multipass exec "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
+multipass start -vvvv "$INSTANCE_NAME"
+
+# https://github.com/canonical/multipass/issues/3252
+sleep 5
+multipass mount -vvvv -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" || true
+
+multipass exec -vvvv "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
