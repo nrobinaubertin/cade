@@ -129,12 +129,12 @@ runcmd:
     adduser @USERNAME@ docker
     snap disable docker
     snap enable docker
-    iptables-legacy -I DOCKER-USER -j ACCEPT
 
   - |
     # setup charmcraft
     lxd init --auto
     adduser @USERNAME@ lxd
+    iptables -P FORWARD ACCEPT
 EOF
 )
 
