@@ -149,15 +149,21 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   # The low timeout is low so that we get control again relatively fast.
   # Of course, the VM will probably not have everything started yet.
   # That's why we mark this operation as a success even if it times out.
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G --timeout 120 || true
-  multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME"
+  multipass launch -vvvv -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G --timeout 120 || true
+  # multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME"
   rm "$launch_file"
 fi
 
-multipass start -vvvv "$INSTANCE_NAME"
+multipass start -vvvv "$INSTANCE_NAME" || true
 
 # https://github.com/canonical/multipass/issues/3252
-sleep 5
-multipass mount -vvvv -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" || true
+while [ -z "$mountflag" ]; do
+  out="$(multipass mount -vvvv -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>&1 || true)"
+  if $? || printf "%s" "$out" | grep "already mounted"; then
+    mountflag="ok"
+  else
+    sleep 1
+  fi
+done
 
 multipass exec -vvvv "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
