@@ -70,15 +70,25 @@ write_files:
     #!/bin/sh
     set -xe
     USERNAME="$(id -un)"
-    [ -n "$1" ] && CHANNEL="$1" || CHANNEL="3.1"
+    [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
+    [ -n "$2" ] && TARGET="$2" || TARGET="3.1"
+    reset_microk8s
+    reset_lxd
     sudo snap remove --purge juju
     rm -rf "/home/$USERNAME/.local/share/juju"
-    sudo snap install juju --classic --channel="$CHANNEL"
-    sg snap_microk8s -c "juju update-public-clouds --client"
-    sg snap_microk8s -c "juju update-k8s --client microk8s"
-    sg snap_microk8s -c "juju bootstrap microk8s mk8s --verbose --show-log"
-    sg snap_microk8s -c "juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'"
-    sg snap_microk8s -c "juju add-model dev"
+    case "$TYPE" in
+      chan*|CHAN*)
+        sudo snap install juju --classic --channel="$TARGET";;
+      rev*|REV*)
+        sudo snap install juju --classic --revision="$TARGET";;
+      ver*|VER*)
+        build_juju "$TARGET"
+    esac
+    juju update-public-clouds --client
+    juju update-k8s --client microk8s
+    juju bootstrap microk8s mk8s --verbose --show-log
+    juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    juju add-model dev
   path: /usr/local/bin/reset_juju
   permissions: '0755'
 - content: |
@@ -89,9 +99,19 @@ write_files:
     sudo snap install snapcraft --classic
     snapcraft --use-lxd
     sudo snap install *.snap --dangerous
-    sudo snap connect juju:lxd lxd
     sudo snap connect juju:config-lxd
+    sudo snap connect juju:dot-aws
+    sudo snap connect juju:dot-azure
+    sudo snap connect juju:dot-google
+    sudo snap connect juju:dot-kubernetes
     sudo snap connect juju:dot-local-share-juju
+    sudo snap connect juju:dot-maas
+    sudo snap connect juju:dot-openstack
+    sudo snap connect juju:dot-oracle
+    sudo snap connect juju:lxd lxd
+    sudo snap connect juju:network
+    sudo snap connect juju:network-bind
+    sudo snap connect juju:peers microk8s
     sudo snap connect juju:ssh-keys
     rm -rf "$build_dir"
   path: /usr/local/bin/build_juju
