@@ -39,7 +39,6 @@ packages:
 
 snap:
   commands:
-    - snap install lxd
     - snap install docker
     - snap install charmcraft --classic
     - snap install rockcraft --classic --edge
@@ -97,6 +96,13 @@ write_files:
     rm -rf "$build_dir"
   path: /usr/local/bin/build_juju
   permissions: '0755'
+- content: |
+    #!/bin/sh
+    sudo snap remove --purge lxd
+    sudo snap install lxd
+    lxd init --auto
+  path: /usr/local/bin/reset_lxd
+  permissions: '0755'
 
 runcmd:
   - |
@@ -104,6 +110,33 @@ runcmd:
     sysctl -w vm.swappiness=0
     echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
     swapoff -a
+
+  - |
+    # setup docker
+    addgroup --system docker
+    adduser @USERNAME@ docker
+    snap disable docker
+    snap enable docker
+
+  - |
+    # add lxd group for later
+    # Follow: https://github.com/canonical/ubuntu-core-desktop-snapd/blob/master/osutil/user.go#L150
+    groupadd --system lxd
+    useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g lxd lxd
+    adduser @USERNAME@ lxd
+    # fix lxd not having network when docker is installed
+    iptables -P FORWARD ACCEPT
+
+  - |
+    # add microk8s groups for later
+    # Follow: https://github.com/canonical/ubuntu-core-desktop-snapd/blob/master/osutil/user.go#L150
+    # 584789 should be used as uid/gid for snap_microk8s: https://github.com/snapcore/snapd/blob/master/snap/system_usernames.go#L156C24-L156C30
+    groupadd --system --gid 584789 snap_microk8s
+    useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g snap_microk8s --uid 584789 snap_microk8s
+    adduser @USERNAME@ snap_microk8s
+    groupadd --system microk8s
+    useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g microk8s microk8s
+    adduser @USERNAME@ microk8s
 
   - |
     # disable unnecessary services
@@ -122,19 +155,6 @@ runcmd:
     # apt cleanup
     apt remove -y landscape-client landscape-common
     apt-get autoremove -y
-
-  - |
-    # setup docker
-    addgroup --system docker
-    adduser @USERNAME@ docker
-    snap disable docker
-    snap enable docker
-
-  - |
-    # setup charmcraft
-    lxd init --auto
-    adduser @USERNAME@ lxd
-    iptables -P FORWARD ACCEPT
 EOF
 )
 
@@ -158,11 +178,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
-  # The low timeout is low so that we get control again relatively fast.
-  # Of course, the VM will probably not have everything started yet.
-  # That's why we mark this operation as a success even if it times out.
-  multipass launch -vvvv -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G --timeout 120 || true
-  # multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME"
+  multipass launch -vvvv -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
   rm "$launch_file"
 fi
 
