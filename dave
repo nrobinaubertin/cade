@@ -1,15 +1,10 @@
 #!/bin/sh
 
-# launch failed: Remote "" is unknown or unreachable.
-# https://github.com/canonical/multipass/issues/1853
-# sudo snap restart multipass.multipassd
-
 set -xe
 
 INSTANCE_NAME="dave"
 USERNAME="$(id -un)"
 
-# The following makes this script self contained
 LAUNCH_YAML=$(
 cat <<'EOF'
 #cloud-config
