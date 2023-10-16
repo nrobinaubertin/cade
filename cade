@@ -2,7 +2,7 @@
 
 set -xe
 
-INSTANCE_NAME="dave"
+INSTANCE_NAME="cade"
 USERNAME="$(id -un)"
 
 LAUNCH_YAML=$(

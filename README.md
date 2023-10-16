@@ -1,6 +1,6 @@
-# Dave
+# Cade
 
-Dave (Developer's Automated Virtual Environment) is an attempt at making a scripted environment suitable for the development and testing of charms.  
+Cade (Charm's Automated Development Environment) is an attempt at making a scripted environment suitable for the development and testing of charms.  
 
 Goals:
 - only one POSIX shell script
