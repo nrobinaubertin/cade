@@ -1,8 +1,7 @@
 #!/bin/sh
 
-set -xe
-
 INSTANCE_NAME="cade"
+SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
 
 LAUNCH_YAML=$(
@@ -191,7 +190,10 @@ if [ "$1" = "--clean" ]; then
       multipass delete "$INSTANCE_NAME"
       multipass purge
     fi
+    sed -i '/cade-multipass/d' "$HOME/.ssh/authorized_keys"
+    rm -rf "$SHARE_DIR"
   fi
+  exit
 fi
 
 if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
