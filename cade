@@ -181,9 +181,34 @@ runcmd:
 EOF
 )
 
+if [ "$1" = "expose" ]; then
+  if [ -z "$2" ]; then
+    echo "You need to specify a port"
+    exit 1
+  fi
+  cade unexpose
+  mkdir -p "$SHARE_DIR"
+  [ -f "$SHARE_DIR"/sshkey ] || ssh-keygen -N "" -t ed25519 -C "cade-multipass-$(date -I)" -f "$SHARE_DIR/sshkey"
+  sed -i '/cade-multipass/d' "$HOME/.ssh/authorized_keys"
+  cat "$SHARE_DIR/sshkey.pub" >> "$HOME/.ssh/authorized_keys"
+  (
+    cade_ip="$(multipass list | grep "$INSTANCE_NAME" | awk '{print $3}')"
+    sudo nohup ssh -v -N -i "$SHARE_DIR/sshkey" -L "$2:127.0.0.1:$2" "$USERNAME@$cade_ip" > "$SHARE_DIR/tunnel.log" &
+    echo $! > "$SHARE_DIR/expose.pid"
+  ) 2>/dev/null >/dev/null
+  exit
+fi
 
-if [ "$1" = "--clean" ]; then
-  printf 'Are you sure (y/n)? '
+if [ "$1" = "unexpose" ]; then
+  if [ -f "$SHARE_DIR/expose.pid" ]; then
+    sudo kill "$(cat "$SHARE_DIR/expose.pid")"
+    rm "$SHARE_DIR/expose.pid"
+  fi
+  exit
+fi
+
+if [ "$1" = "clean" ]; then
+  printf 'Are you sure (y/N)? '
   read -r answer
   if [ "$answer" != "${answer#[Yy]}" ] ;then
     if multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
