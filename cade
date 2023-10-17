@@ -221,6 +221,40 @@ if [ "$1" = "clean" ]; then
   exit
 fi
 
+if [ "$1" = "stop" ]; then
+  multipass stop "$INSTANCE_NAME"
+  exit
+fi
+
+if [ -n "$1" ]; then
+  cat << 'EOF'
+Cade: A tool for setting up a charm development environment using Multipass.
+
+Usage:
+  cade expose <port>
+  cade unexpose
+  cade clean
+  cade stop
+  cade
+
+Options:
+  expose <port>      Expose the specified port for the Cade instance.
+  unexpose           Terminate the exposed port session for the Cade instance.
+  clean              Purge and remove Cade instance and its associated files, after confirmation.
+  stop               Stop the Cade instance.
+                     (No option) Starts or initializes the Cade instance if not already done.
+
+Notes:
+  - `cade expose` sets up an SSH tunnel from the host machine to the Cade instance on the specified port.
+  - `cade unexpose` kills the SSH tunnel process for the exposed port.
+  - `cade clean` offers a prompt for confirmation before deleting the instance and associated files.
+  - Running `cade` with no arguments ensures that the Cade instance is running, mounts the user's home directory, and starts an interactive shell within the instance.
+EOF
+  exit
+fi
+
+set -xe
+
 if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
   # We're purging to remove the instance if it was deleted
   multipass purge
