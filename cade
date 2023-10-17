@@ -40,7 +40,6 @@ snap:
 write_files:
 - content: |
     #!/bin/sh
-    set -xe
     USERNAME="$(id -un)"
     [ -n "$1" ] && CHANNEL="$1" || CHANNEL="1.27-strict/stable"
     sudo snap remove --purge microk8s
@@ -64,7 +63,6 @@ write_files:
   permissions: '0755'
 - content: |
     #!/bin/sh
-    set -xe
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="3.1"
@@ -82,11 +80,11 @@ write_files:
     esac
     juju update-public-clouds --client
     juju update-k8s --client microk8s
-    juju bootstrap microk8s mk8s --verbose --show-log
+    juju bootstrap microk8s mk8s
     juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
     juju add-model dev
     if [ "$3" = "--with-machine" ]; then
-      juju bootstrap localhost lxd --verbose --show-log
+      juju bootstrap localhost lxd
       juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
       microk8s.config | juju add-k8s mk8s --controller=lxd
       juju add-model devk8s mk8s
@@ -253,8 +251,6 @@ EOF
   exit
 fi
 
-set -xe
-
 if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
   # We're purging to remove the instance if it was deleted
   multipass purge
@@ -263,15 +259,15 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
-  multipass launch -vvvv -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
   rm "$launch_file"
 fi
 
-multipass start -vvvv "$INSTANCE_NAME" || true
+multipass start "$INSTANCE_NAME" || true
 
 # https://github.com/canonical/multipass/issues/3252
 while [ -z "$mountflag" ]; do
-  out="$(multipass mount -vvvv -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>&1 || true)"
+  out="$(multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>&1 || true)"
   if $? || printf "%s" "$out" | grep "already mounted"; then
     mountflag="ok"
   else
@@ -279,4 +275,4 @@ while [ -z "$mountflag" ]; do
   fi
 done
 
-multipass exec -vvvv "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
+multipass exec "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
