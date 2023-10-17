@@ -86,6 +86,13 @@ write_files:
     juju bootstrap microk8s mk8s --verbose --show-log
     juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
     juju add-model dev
+    if [ "$3" = "--with-machine" ]; then
+      juju bootstrap localhost lxd --verbose --show-log
+      juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+      microk8s.config | juju add-k8s mk8s --controller=lxd
+      juju add-model devk8s mk8s
+      juju add-model db localhost
+    fi
   path: /usr/local/bin/reset_juju
   permissions: '0755'
 - content: |
