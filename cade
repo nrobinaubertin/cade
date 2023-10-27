@@ -66,6 +66,7 @@ write_files:
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="3.1"
+    [ "3.0" = "$(printf "3.0\\n%s" "$TARGET" | sort -V | head -n1)" ] && oldflag="no" || oldflag="yes"
     reset_microk8s
     reset_lxd
     sudo snap remove --purge juju
@@ -81,11 +82,19 @@ write_files:
     juju update-public-clouds --client
     juju update-k8s --client microk8s
     juju bootstrap microk8s mk8s
-    juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    if [ "$oldflag" = "no" ]; then
+      juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    else
+      juju model-defaults microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    fi
     juju add-model dev
     if [ "$3" = "--with-machine" ]; then
       juju bootstrap localhost lxd
-      juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+      if [ "$oldflag" = "no" ]; then
+        juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+      else
+        juju model-defaults localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+      fi
       microk8s.config | juju add-k8s mk8s --controller=lxd
       juju add-model devk8s mk8s
       juju add-model db localhost
