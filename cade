@@ -131,6 +131,7 @@ write_files:
     sudo snap remove --purge lxd
     sudo snap install lxd
     lxd init --auto
+    sudo iptables -P FORWARD ACCEPT
   path: /usr/local/bin/reset_lxd
   permissions: '0755'
 
@@ -154,8 +155,6 @@ runcmd:
     groupadd --system lxd
     useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g lxd lxd
     adduser @USERNAME@ lxd
-    # fix lxd not having network when docker is installed
-    iptables -P FORWARD ACCEPT
 
   - |
     # add microk8s groups for later
