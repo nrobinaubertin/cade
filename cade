@@ -3,6 +3,7 @@
 INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
+LAUNCH_DIR="$(pwd)"
 
 LAUNCH_YAML=$(
 cat <<'EOF'
@@ -272,15 +273,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
 fi
 
 multipass start "$INSTANCE_NAME" || true
+multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" || true
 
-# https://github.com/canonical/multipass/issues/3252
-while [ -z "$mountflag" ]; do
-  out="$(multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>&1 || true)"
-  if $? || printf "%s" "$out" | grep "already mounted"; then
-    mountflag="ok"
-  else
-    sleep 1
-  fi
-done
-
-multipass exec "$INSTANCE_NAME" -- sudo su -l -s /bin/bash "$USERNAME"
+# launching a shell with the correct user inside the VM to the right path
+multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" "sh -c 'cd "$LAUNCH_DIR"; /bin/bash'"
