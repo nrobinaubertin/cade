@@ -42,15 +42,24 @@ write_files:
 - content: |
     #!/bin/sh
     USERNAME="$(id -un)"
-    [ -n "$1" ] && CHANNEL="$1" || CHANNEL="1.27-strict/stable"
+    [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
+    [ -n "$2" ] && TARGET="$2" || TARGET="1.27-strict/stable"
     sudo snap remove --purge microk8s
-    sudo snap install microk8s --channel="$CHANNEL"
+    case "$TYPE" in
+      chan*|CHAN*)
+        sudo snap install microk8s --channel="$TARGET";;
+      dir*|DIR*)
+        cd "$TARGET"
+        sudo snap ack microk8s_*.assert
+        sudo snap install microk8s_*.snap
+        find . -name "*.tar" | xargs -n1 sudo microk8s ctr images import --platform amd64;;
+    esac
     mkdir -p "/home/$USERNAME/.kube"
     sudo chown -f -R "$USERNAME" "/home/$USERNAME/.kube"
     sudo snap alias microk8s.kubectl kubectl
     sudo microk8s.enable dns
     sudo microk8s.kubectl rollout status deployments/coredns -n kube-system -w --timeout=600s
-    sudo microk8s.enable hostpath-storage ingress
+    sudo microk8s.enable hostpath-storage
     sudo microk8s.enable ingress
     sudo microk8s.kubectl rollout status deployments/hostpath-provisioner -n kube-system -w --timeout=600s
     sudo microk8s.kubectl rollout status daemonsets/nginx-ingress-microk8s-controller -n ingress -w --timeout=600s
@@ -64,21 +73,32 @@ write_files:
   permissions: '0755'
 - content: |
     #!/bin/sh
+    set -xe
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="3.1"
     [ "3.0" = "$(printf "3.0\\n%s" "$TARGET" | sort -V | head -n1)" ] && oldflag="no" || oldflag="yes"
-    reset_microk8s
-    reset_lxd
     sudo snap remove --purge juju
     rm -rf "/home/$USERNAME/.local/share/juju"
     case "$TYPE" in
       chan*|CHAN*)
+        reset_microk8s
+        reset_lxd
         sudo snap install juju --classic --channel="$TARGET";;
       rev*|REV*)
+        reset_microk8s
+        reset_lxd
         sudo snap install juju --classic --revision="$TARGET";;
       ver*|VER*)
-        build_juju "$TARGET"
+        reset_microk8s
+        reset_lxd
+        build_juju "$TARGET";;
+      dir*|DIR*)
+        cd "$TARGET"
+        reset_microk8s DIR "$TARGET"
+        reset_lxd DIR "$TARGET"
+        sudo snap ack juju_*.assert
+        sudo snap install juju_*.snap
     esac
     juju update-public-clouds --client
     juju update-k8s --client microk8s
@@ -129,8 +149,17 @@ write_files:
   permissions: '0755'
 - content: |
     #!/bin/sh
+    [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
+    [ -n "$2" ] && TARGET="$2" || TARGET="5.19/stable"
     sudo snap remove --purge lxd
-    sudo snap install lxd
+    case "$TYPE" in
+      chan*|CHAN*)
+        sudo snap install lxd --channel="$TARGET";;
+      dir*|DIR*)
+        cd "$TARGET"
+        sudo snap ack lxd_*.assert
+        sudo snap install lxd_*.snap
+    esac
     lxd init --auto
     sudo iptables -P FORWARD ACCEPT
   path: /usr/local/bin/reset_lxd
@@ -261,6 +290,7 @@ EOF
 fi
 
 if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
+  echo "Creating instance"
   # We're purging to remove the instance if it was deleted
   multipass purge
   # We're creating the temporary file in $HOME to be sure 
@@ -273,7 +303,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
 fi
 
 multipass start "$INSTANCE_NAME" || true
-multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" || true
+multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>/dev/null || true
 
 # launching a shell with the correct user inside the VM to the right path
 multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" "sh -c 'cd "$LAUNCH_DIR"; /bin/bash'"
