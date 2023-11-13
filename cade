@@ -29,6 +29,7 @@ packages:
   - jq
   - rsync
   - socat
+  - squid-openssl
   - sysstat
   - vim
 
@@ -54,6 +55,14 @@ write_files:
         sudo snap install microk8s_*.snap
         find . -name "*.tar" | xargs -n1 sudo microk8s ctr images import --platform amd64;;
     esac
+    sudo cp /etc/squid/squid-self-signed.crt /var/snap/microk8s/current/certs/
+    sudo echo 'ca = "/var/snap/microk8s/current/certs/squid-self-signed.crt"' >> /var/snap/microk8s/current/args/certs.d/docker.io/hosts.toml
+    sudo echo 'ca = "/var/snap/microk8s/current/certs/squid-self-signed.crt"' >> /var/snap/microk8s/current/args/certs.d/localhost\:32000/hosts.toml
+    sudo cp -r /var/snap/microk8s/current/args/certs.d/localhost\:32000/ /var/snap/microk8s/current/args/certs.d/quay.io/
+    sudo sed -i 's/localhost:32000/quay.io/g' /var/snap/microk8s/current/args/certs.d/quay.io/hosts.toml
+    sudo cp -r /var/snap/microk8s/current/args/certs.d/localhost\:32000/ /var/snap/microk8s/current/args/certs.d/registry.k8s.io/
+    sudo sed -i 's/localhost:32000/registry.k8s.io/g' /var/snap/microk8s/current/args/certs.d/registry.k8s.io/hosts.toml
+    sudo snap restart microk8s
     mkdir -p "/home/$USERNAME/.kube"
     sudo chown -f -R "$USERNAME" "/home/$USERNAME/.kube"
     sudo snap alias microk8s.kubectl kubectl
@@ -67,7 +76,6 @@ write_files:
     sudo microk8s.enable registry
     IPADDR=$(ip -4 -j route get 2.2.2.2 | jq -r '.[] | .prefsrc')
     sudo microk8s.enable "metallb:$IPADDR-$IPADDR"
-    sudo microk8s start
     sudo microk8s config > "/home/$USERNAME/.kube/config"
   path: /usr/local/bin/reset_microk8s
   permissions: '0755'
@@ -164,6 +172,89 @@ write_files:
     sudo iptables -P FORWARD ACCEPT
   path: /usr/local/bin/reset_lxd
   permissions: '0755'
+- content: |
+    visible_hostname squid.internal
+
+    # Example rule allowing access from your local networks.
+    # Adapt to list your (internal) IP networks from where browsing
+    # should be allowed
+    acl localnet src 0.0.0.1-0.255.255.255  # RFC 1122 "this" network (LAN)
+    acl localnet src 10.0.0.0/8             # RFC 1918 local private network (LAN)
+    acl localnet src 100.64.0.0/10          # RFC 6598 shared address space (CGN)
+    acl localnet src 169.254.0.0/16         # RFC 3927 link-local (directly plugged) machines
+    acl localnet src 172.16.0.0/12          # RFC 1918 local private network (LAN)
+    acl localnet src 192.168.0.0/16         # RFC 1918 local private network (LAN)
+    acl localnet src fc00::/7               # RFC 4193 local private network range
+    acl localnet src fe80::/10              # RFC 4291 link-local (directly plugged) machines
+
+    acl SSL_ports port 443
+    acl Safe_ports port 80          # http
+    acl Safe_ports port 21          # ftp
+    acl Safe_ports port 443         # https
+    acl Safe_ports port 70          # gopher
+    acl Safe_ports port 210         # wais
+    acl Safe_ports port 1025-65535  # unregistered ports
+    acl Safe_ports port 280         # http-mgmt
+    acl Safe_ports port 488         # gss-http
+    acl Safe_ports port 591         # filemaker
+    acl Safe_ports port 777         # multiling http
+
+    # We don't cache docker/oci manifest files
+    # this is done because quay.io doesn't work when caching those
+    acl NO_CACHE_MANIFEST rep_mime_type -i application/vnd.docker.distribution.manifest.v2+json application/vnd.docker.distribution.manifest.list.v2+json application/vnd.oci.image.manifest.v1+json application/vnd.oci.image.index.v1+json
+    cache deny NO_CACHE_MANIFEST
+
+    # Recommended minimum Access Permission configuration:
+    # Deny requests to certain unsafe ports
+    http_access deny !Safe_ports
+
+    # Deny CONNECT to other than secure SSL ports
+    http_access deny CONNECT !SSL_ports
+
+    # Only allow cachemgr access from localhost
+    http_access allow localhost manager
+    http_access deny manager
+
+    # INSERT YOUR OWN RULE(S) HERE TO ALLOW ACCESS FROM YOUR CLIENTS
+    include /etc/squid/conf.d/*.conf
+
+    # Example rule allowing access from your local networks.
+    # Adapt localnet in the ACL section to list your (internal) IP networks
+    # from where browsing should be allowed
+    #http_access allow localnet
+    http_access allow localhost
+
+    # And finally deny all other access to this proxy
+    http_access deny all
+
+    # Squid normally listens to port 3128
+    http_port 3128 ssl-bump generate-host-certificates=on tls-cert=/etc/squid/squid-self-signed.pem tls-key=/etc/squid/squid-self-signed.key tls-dh=prime256v1:/etc/squid/squid-self-signed_dhparam.pem tls-default-ca=on
+
+    # Become a TCP tunnel without decrypting proxied traffic.
+    ssl_bump server-first all
+
+    maximum_object_size 6 GB
+
+    # Uncomment and adjust the following to add a disk cache directory.
+    cache_dir ufs /var/spool/squid 32000 16 256
+
+
+    # Leave coredumps in the first cache dir
+    coredump_dir /var/spool/squid
+
+    # Add any of your own refresh_pattern entries above these.
+    refresh_pattern ^ftp:           1440    20%     10080
+    refresh_pattern ^gopher:        1440    0%      1440
+    refresh_pattern -i (/cgi-bin/|\?) 0     0%      0
+    refresh_pattern \/(Packages|Sources)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
+    refresh_pattern \/Release(|\.gpg)$ 0 0% 0 refresh-ims
+    refresh_pattern \/InRelease$ 0 0% 0 refresh-ims
+    refresh_pattern \/(Translation-.*)(|\.bz2|\.gz|\.xz)$ 0 0% 0 refresh-ims
+    # example pattern for deb packages
+    #refresh_pattern (\.deb|\.udeb)$   129600 100% 129600
+    refresh_pattern .               0       20%     4320
+  path: /etc/squid/squid.conf
+  permissions: '0644'
 
 runcmd:
   - |
@@ -212,8 +303,23 @@ runcmd:
 
   - |
     # apt cleanup
-    apt remove -y landscape-client landscape-common
+    apt-get remove -y landscape-client landscape-common
     apt-get autoremove -y
+
+  - |
+    # install squid
+    echo "127.0.0.1 squid.internal" >> /etc/hosts
+    mkdir -p /var/spool/squid
+    chown proxy: /var/spool/squid
+    cd /etc/squid
+    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -extensions v3_ca -keyout squid-self-signed.key -out squid-self-signed.crt -subj "/CN=cade"
+    openssl x509 -in squid-self-signed.crt -outform DER -out squid-self-signed.der
+    openssl x509 -in squid-self-signed.crt -outform PEM -out squid-self-signed.pem
+    openssl dhparam -outform PEM -out squid-self-signed_dhparam.pem 2048
+    sudo cp /etc/squid/squid-self-signed.pem /usr/local/share/ca-certificates/squid-self-signed.crt
+    update-ca-certificates
+    sudo -u proxy /usr/lib/squid/security_file_certgen -c -s /var/spool/squid/ssl_db -M 4MB
+    systemctl restart squid
 EOF
 )
 
