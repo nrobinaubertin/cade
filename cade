@@ -92,7 +92,11 @@ write_files:
       chan*|CHAN*)
         reset_microk8s
         reset_lxd
-        sudo snap install juju --classic --channel="$TARGET";;
+        if [ "$oldflag" = "yes" ]; then
+          sudo snap install juju --classic --channel="$TARGET"
+        else
+          sudo snap install juju --channel="$TARGET"
+        fi;;
       rev*|REV*)
         reset_microk8s
         reset_lxd
@@ -109,6 +113,7 @@ write_files:
         sudo snap install juju_*.snap
     esac
     juju update-public-clouds --client
+    sudo snap restart microk8s
     juju update-k8s --client microk8s
     juju bootstrap microk8s mk8s
     if [ "$oldflag" = "no" ]; then
@@ -199,10 +204,11 @@ write_files:
     acl Safe_ports port 591         # filemaker
     acl Safe_ports port 777         # multiling http
 
-    # We don't cache docker/oci manifest files
-    # this is done because quay.io doesn't work when caching those
-    acl NO_CACHE_MANIFEST rep_mime_type -i application/vnd.docker.distribution.manifest.v2+json application/vnd.docker.distribution.manifest.list.v2+json application/vnd.oci.image.manifest.v1+json application/vnd.oci.image.index.v1+json
-    cache deny NO_CACHE_MANIFEST
+    # Don't cache by default
+    cache deny localnet
+    acl domain_to_cache dstdomain .docker.io .snapcraft.io .docker.com .linuxcontainers.org .ubuntu.com .gcr.io .k8s.io .amazonaws.com
+    cache allow domain_to_cache
+    cache deny all
 
     # Recommended minimum Access Permission configuration:
     # Deny requests to certain unsafe ports
@@ -238,7 +244,6 @@ write_files:
     # Uncomment and adjust the following to add a disk cache directory.
     cache_dir ufs /var/spool/squid 32000 16 256
 
-
     # Leave coredumps in the first cache dir
     coredump_dir /var/spool/squid
 
@@ -254,6 +259,15 @@ write_files:
     #refresh_pattern (\.deb|\.udeb)$   129600 100% 129600
     refresh_pattern .               0       20%     4320
   path: /etc/squid/squid.conf
+  permissions: '0644'
+- content: |
+    HTTPS_PROXY=http://squid.internal:3128
+    HTTP_PROXY=http://squid.internal:3128
+    NO_PROXY=10.0.0.0/8,192.168.0.0/16,127.0.0.1,172.16.0.0/16,.svc,.cluster.local
+    https_proxy=http://squid.internal:3128
+    http_proxy=http://squid.internal:3128
+    no_proxy=10.0.0.0/8,192.168.0.0/16,127.0.0.1,172.16.0.0/16,.svc,.cluster.local
+  path: /etc/environment
   permissions: '0644'
 
 runcmd:
