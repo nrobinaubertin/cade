@@ -44,3 +44,37 @@ Notes:
   - `cade clean` offers a prompt for confirmation before deleting the instance and associated files.
   - Running `cade` with no arguments ensures that the Cade instance is running, mounts the user's home directory, and starts an interactive shell within the instance.
 ```
+
+### Helper commands inside the VM
+
+#### reset_microk8s
+
+```
+reset_microk8s [TYPE] [TARGET]
+
+reset_microk8s is a script to remove and reinstall MicroK8s. It can reset MicroK8s from a specified channel or from a local directory containing the necessary snap packages.
+TYPE   The type of reset to perform, typically "CHANNEL" or "DIR".
+TARGET The target version or directory for MicroK8s installation.
+```
+
+#### reset_juju
+
+```
+reset_juju [TYPE] [TARGET] [--with-machine]
+
+reset_juju is a script to remove and reinstall Juju, along with resetting MicroK8s and LXD. It supports resetting from a channel, revision, version, or directory.
+TYPE   The type of reset to perform: "CHANNEL", "REV", "VER", or "DIR".
+TARGET The target version, revision, or directory for the Juju installation.
+--with-machine
+      If this option is provided, the script will also bootstrap a new Juju controller on localhost using LXD and add new models.
+```
+
+#### reset_lxd
+
+```
+reset_lxd [TYPE] [TARGET]
+
+reset_lxd is a script to remove and reinstall LXD. It can reset LXD from a specified channel or from a local directory containing the snap package.
+TYPE   The type of reset to perform, typically "CHANNEL" or "DIR".
+TARGET The target version or directory for LXD installation.
+```
