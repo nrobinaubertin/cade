@@ -216,6 +216,10 @@ runcmd:
     # apt cleanup
     apt remove -y landscape-client landscape-common
     apt-get autoremove -y
+
+  - |
+    # add skopeo to the PATH (this is for 22.04, TODO: change that for 24.04)
+    sudo ln -sf /snap/rockcraft/current/bin/skopeo /usr/local/bin/skopeo
 EOF
 )
 
