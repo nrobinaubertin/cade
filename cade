@@ -43,7 +43,7 @@ write_files:
     #!/bin/sh
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
-    [ -n "$2" ] && TARGET="$2" || TARGET="1.27-strict/stable"
+    [ -n "$2" ] && TARGET="$2" || TARGET="1.28-strict/stable"
     sudo snap remove --purge microk8s
     case "$TYPE" in
       chan*|CHAN*)
@@ -100,6 +100,7 @@ write_files:
         sudo snap ack juju_*.assert
         sudo snap install juju_*.snap
     esac
+    sudo snap restart microk8s
     juju update-public-clouds --client
     juju update-k8s --client microk8s
     juju bootstrap microk8s mk8s
@@ -185,6 +186,7 @@ runcmd:
     groupadd --system lxd
     useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g lxd lxd
     adduser @USERNAME@ lxd
+    reset_lxd # reset lxd now so that it's ready when we start working
 
   - |
     # add microk8s groups for later
@@ -295,7 +297,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 2 --memory 8G --disk 128G || true
   rm "$launch_file"
 fi
 
