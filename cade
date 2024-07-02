@@ -76,7 +76,7 @@ write_files:
     set -xe
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
-    [ -n "$2" ] && TARGET="$2" || TARGET="3.1"
+    [ -n "$2" ] && TARGET="$2" || TARGET="3/stable"
     [ "3.0" = "$(printf "3.0\\n%s" "$TARGET" | sort -V | head -n1)" ] && oldflag="no" || oldflag="yes"
     sudo snap remove --purge juju
     rm -rf "/home/$USERNAME/.local/share/juju"
