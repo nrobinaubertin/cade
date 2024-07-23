@@ -36,7 +36,8 @@ snap:
   commands:
     - snap install docker
     - snap install charmcraft --classic
-    - snap install rockcraft --classic --edge
+    - snap install rockcraft --classic
+    - snap install jhack
 
 write_files:
 - content: |
@@ -77,7 +78,6 @@ write_files:
     USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="3/stable"
-    [ "3.0" = "$(printf "3.0\\n%s" "$TARGET" | sort -V | head -n1)" ] && oldflag="no" || oldflag="yes"
     sudo snap remove --purge juju
     rm -rf "/home/$USERNAME/.local/share/juju"
     case "$TYPE" in
@@ -104,22 +104,14 @@ write_files:
     juju update-public-clouds --client
     juju update-k8s --client microk8s
     juju bootstrap microk8s mk8s
-    if [ "$oldflag" = "no" ]; then
-      juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-    else
-      juju model-defaults microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-    fi
+    juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
     juju add-model dev
     if [ "$3" = "--with-machine" ]; then
       juju bootstrap localhost lxd
-      if [ "$oldflag" = "no" ]; then
-        juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-      else
-        juju model-defaults localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-      fi
+      juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
       microk8s.config | juju add-k8s mk8s --controller=lxd
-      juju add-model devk8s mk8s
-      juju add-model db localhost
+      juju add-model k8s mk8s
+      juju add-model machine localhost
     fi
   path: /usr/local/bin/reset_juju
   permissions: '0755'
@@ -301,7 +293,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 2 --memory 8G --disk 128G || true
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
   rm "$launch_file"
 fi
 
