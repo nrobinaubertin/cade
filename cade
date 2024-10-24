@@ -27,9 +27,11 @@ packages:
   - gnome-keyring
   - iproute2
   - jq
+  - ripgrep
   - rsync
   - socat
   - sysstat
+  - tox
   - vim
 
 snap:
@@ -143,7 +145,7 @@ write_files:
 - content: |
     #!/bin/sh
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
-    [ -n "$2" ] && TARGET="$2" || TARGET="5.19/stable"
+    [ -n "$2" ] && TARGET="$2" || TARGET="5.21/stable"
     sudo snap remove --purge lxd
     case "$TYPE" in
       chan*|CHAN*)
@@ -156,6 +158,12 @@ write_files:
     lxd init --auto
     sudo iptables -P FORWARD ACCEPT
   path: /usr/local/bin/reset_lxd
+  permissions: '0755'
+- content: |
+    #!/bin/sh
+    cd "$1"
+    sudo -i -u "@USERNAME@" bash
+  path: /usr/local/bin/start
   permissions: '0755'
 
 runcmd:
@@ -288,17 +296,23 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   echo "Creating instance"
   # We're purging to remove the instance if it was deleted
   multipass purge
+  echo "Deleted instances purged"
   # We're creating the temporary file in $HOME to be sure 
   # that multipass as a snap can read it
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 128G || true
+  echo "Creating the $INSTANCE_NAME instance"
+  echo "multipass launch -n '$INSTANCE_NAME' --cloud-init '$launch_file' --cpus 4 --memory 16G --disk 256G"
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 256G || true
+  multipass stop "$INSTANCE_NAME"
   rm "$launch_file"
 fi
 
+echo "Start $INSTANCE_NAME"
+
+multipass mount -g "$(id -g):1000" -u "$(id -u):1000" --type native ~ "$INSTANCE_NAME" 2>/dev/null || true
 multipass start "$INSTANCE_NAME" || true
-multipass mount -g "$(id -g):1000" -u "$(id -u):1000" ~ "$INSTANCE_NAME" 2>/dev/null || true
 
 # launching a shell with the correct user inside the VM to the right path
-multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" "sh -c 'cd "$LAUNCH_DIR"; /bin/bash'"
+multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
