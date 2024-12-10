@@ -44,9 +44,11 @@ snap:
 write_files:
 - content: |
     #!/bin/sh
-    USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="1.28-strict/stable"
+    USERNAME="$(id -un)"
+    rm -rf "/home/$USERNAME/snap/microk8s/"
+    rm -rf "/home/$USERNAME/.local/share/microk8s"
     sudo snap remove --purge microk8s
     case "$TYPE" in
       chan*|CHAN*)
@@ -72,50 +74,31 @@ write_files:
     sudo microk8s.enable "metallb:$IPADDR-$IPADDR"
     sudo microk8s start
     sudo microk8s config > "/home/$USERNAME/.kube/config"
-  path: /usr/local/bin/reset_microk8s
+  path: /usr/local/bin/prepare_microk8s
   permissions: '0755'
 - content: |
     #!/bin/sh
     set -xe
-    USERNAME="$(id -un)"
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="3/stable"
-    sudo snap remove --purge juju
+    USERNAME="$(id -un)"
+    rm -rf "/home/$USERNAME/snap/juju/"
     rm -rf "/home/$USERNAME/.local/share/juju"
+    sudo snap remove --purge juju
     case "$TYPE" in
       chan*|CHAN*)
-        reset_microk8s
-        reset_lxd
         sudo snap install juju --classic --channel="$TARGET";;
       rev*|REV*)
-        reset_microk8s
-        reset_lxd
         sudo snap install juju --classic --revision="$TARGET";;
       ver*|VER*)
-        reset_microk8s
-        reset_lxd
         build_juju "$TARGET";;
       dir*|DIR*)
         cd "$TARGET"
-        reset_microk8s DIR "$TARGET"
-        reset_lxd DIR "$TARGET"
         sudo snap ack juju_*.assert
         sudo snap install juju_*.snap
     esac
-    sudo snap restart microk8s
     juju update-public-clouds --client
-    juju update-k8s --client microk8s
-    juju bootstrap microk8s mk8s
-    juju model-defaults --cloud=microk8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-    juju add-model dev
-    if [ "$3" = "--with-machine" ]; then
-      juju bootstrap localhost lxd
-      juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-      microk8s.config | juju add-k8s mk8s --controller=lxd
-      juju add-model k8s mk8s
-      juju add-model machine localhost
-    fi
-  path: /usr/local/bin/reset_juju
+  path: /usr/local/bin/prepare_juju
   permissions: '0755'
 - content: |
     #!/bin/sh
@@ -146,6 +129,9 @@ write_files:
     #!/bin/sh
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
     [ -n "$2" ] && TARGET="$2" || TARGET="5.21/stable"
+    USERNAME="$(id -un)"
+    rm -rf "/home/$USERNAME/snap/lxd/"
+    rm -rf "/home/$USERNAME/.local/share/lxd"
     sudo snap remove --purge lxd
     case "$TYPE" in
       chan*|CHAN*)
@@ -157,18 +143,17 @@ write_files:
     esac
     lxd init --auto
     sudo iptables -P FORWARD ACCEPT
-  path: /usr/local/bin/reset_lxd
+  path: /usr/local/bin/prepare_lxd
   permissions: '0755'
 - content: |
     #!/bin/sh
-    cd "$1"
-    sudo -i -u "@USERNAME@" bash
+    sudo -i -u "@USERNAME@" bash -c "cd $1; exec bash"
   path: /usr/local/bin/start
   permissions: '0755'
 
 runcmd:
   - |
-    # disable swap
+    # disable swap (microk8s doesn't like swap)
     sysctl -w vm.swappiness=0
     echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
     swapoff -a
@@ -220,6 +205,13 @@ runcmd:
   - |
     # add skopeo to the PATH (this is for 22.04, TODO: change that for 24.04)
     sudo ln -sf /snap/rockcraft/current/bin/skopeo /usr/local/bin/skopeo
+
+  - |
+    # Issue with snaps
+    # `/user.slice/user-1001.slice/session-4.scope is not a snap cgroup`
+    # https://forum.snapcraft.io/t/cannot-launch-snap-applications-with-cgroup-v2/27700
+    # https://forum.snapcraft.io/t/system-slice-cron-service-is-not-a-snap-cgroup/30196
+    loginctl enable-linger @USERNAME@
 EOF
 )
 
@@ -315,4 +307,6 @@ multipass mount -g "$(id -g):1000" -u "$(id -u):1000" --type native ~ "$INSTANCE
 multipass start "$INSTANCE_NAME" || true
 
 # launching a shell with the correct user inside the VM to the right path
+echo "$LAUNCH_DIR"
+set -xe
 multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
