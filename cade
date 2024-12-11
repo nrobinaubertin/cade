@@ -1,5 +1,6 @@
 #!/bin/sh
 
+MULTIPASS_REVISION="13310"
 INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
@@ -257,6 +258,16 @@ if [ "$1" = "stop" ]; then
   exit
 fi
 
+if [ "$1" = "prepare" ]; then
+  multipass stop "$INSTANCE_NAME"
+  sudo snap remove multipass --purge
+  # We install a fixed version of multipass to avoid surprises
+  sudo snap install multipass --revision=$MULTIPASS_REVISION
+  # We need to hold the version to avoid auto-updates
+  sudo snap refresh --hold multipass
+  exit
+fi
+
 if [ -n "$1" ]; then
   cat << 'EOF'
 Cade: A tool for setting up a charm development environment using Multipass.
@@ -293,7 +304,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   # that multipass as a snap can read it
   launch_file="$(mktemp -p "$HOME")"
   echo "$LAUNCH_YAML" > "$launch_file"
-  sed -i -e "s|@USERNAME@|${USERNAME}|g" "$launch_file"
+  sed -i -e "s|@USERNAME@|$USERNAME|g" "$launch_file"
   echo "Creating the $INSTANCE_NAME instance"
   echo "multipass launch -n '$INSTANCE_NAME' --cloud-init '$launch_file' --cpus 4 --memory 16G --disk 256G"
   multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 256G || true
@@ -303,7 +314,7 @@ fi
 
 echo "Start $INSTANCE_NAME"
 
-multipass mount -g "$(id -g):1000" -u "$(id -u):1000" --type native ~ "$INSTANCE_NAME" 2>/dev/null || true
+multipass mount -g "$(id -g):1000" -u "$(id -u):1000" --type native ~ "$INSTANCE_NAME:/home/$USERNAME" 2>/dev/null || true
 multipass start "$INSTANCE_NAME" || true
 
 # launching a shell with the correct user inside the VM to the right path
