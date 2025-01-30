@@ -1,6 +1,11 @@
 #!/bin/sh
 
-MULTIPASS_REVISION="13310"
+# multipass snap revisions
+# 1.15.0 => 13909
+# 1.14.1 => 13843
+# 1.14.0 => 13332
+
+MULTIPASS_REVISION="13843"
 INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
@@ -37,10 +42,9 @@ packages:
 
 snap:
   commands:
-    - snap install docker
-    - snap install charmcraft --classic
-    - snap install rockcraft --classic
-    - snap install jhack
+    - snap install charmcraft --classic --channel=latest/stable
+    - snap install rockcraft --classic --channel=latest/stable
+    - snap install jhack --channel=latest/stable
 
 write_files:
 - content: |
@@ -81,7 +85,7 @@ write_files:
     #!/bin/sh
     set -xe
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
-    [ -n "$2" ] && TARGET="$2" || TARGET="3/stable"
+    [ -n "$2" ] && TARGET="$2" || TARGET="3.6/stable"
     USERNAME="$(id -un)"
     rm -rf "/home/$USERNAME/snap/juju/"
     rm -rf "/home/$USERNAME/.local/share/juju"
@@ -143,7 +147,6 @@ write_files:
         sudo snap install lxd_*.snap
     esac
     lxd init --auto
-    sudo iptables -P FORWARD ACCEPT
   path: /usr/local/bin/prepare_lxd
   permissions: '0755'
 - content: |
@@ -160,19 +163,11 @@ runcmd:
     swapoff -a
 
   - |
-    # setup docker
-    addgroup --system docker
-    adduser @USERNAME@ docker
-    snap disable docker
-    snap enable docker
-
-  - |
     # add lxd group for later
     # Follow: https://github.com/canonical/ubuntu-core-desktop-snapd/blob/master/osutil/user.go#L150
     groupadd --system lxd
     useradd --system --home-dir /nonexistent --no-create-home --shell /bin/false --no-user-group -g lxd lxd
     adduser @USERNAME@ lxd
-    reset_lxd # reset lxd now so that it's ready when we start working
 
   - |
     # add microk8s groups for later
@@ -199,6 +194,13 @@ runcmd:
     systemctl disable systemd-tmpfiles-clean.timer --now
 
   - |
+    # Disable IPv6
+    echo "net.ipv6.conf.all.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    echo "net.ipv6.conf.default.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    echo "net.ipv6.conf.lo.disable_ipv6=1" | tee -a /etc/sysctl.conf
+    sysctl -p
+
+  - |
     # apt cleanup
     apt remove -y landscape-client landscape-common
     apt-get autoremove -y
@@ -213,6 +215,11 @@ runcmd:
     # https://forum.snapcraft.io/t/cannot-launch-snap-applications-with-cgroup-v2/27700
     # https://forum.snapcraft.io/t/system-slice-cron-service-is-not-a-snap-cgroup/30196
     loginctl enable-linger @USERNAME@
+
+  - |
+    # prepare jhack
+    sudo snap connect jhack:dot-local-share-juju snapd
+    sudo snap connect jhack:ssh-read snapd
 EOF
 )
 
@@ -228,6 +235,7 @@ if [ "$1" = "expose" ]; then
   cat "$SHARE_DIR/sshkey.pub" >> "$HOME/.ssh/authorized_keys"
   cade_ip="$(multipass list | grep "$INSTANCE_NAME" | awk '{print $3}')"
   sudo ssh -N -f -o "StrictHostKeyChecking=accept-new" -M -S "$SHARE_DIR/expose-tunnel" -i "$SHARE_DIR/sshkey" -L "$2:127.0.0.1:$2" -l "$USERNAME" "$cade_ip"
+  echo "listen on $cade_ip:$2"
   exit
 fi
 
