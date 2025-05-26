@@ -1,6 +1,11 @@
 #!/bin/sh
 
+# `cannot connect to the multipass socket`
+# check `sudo snap services` and `sudo snap logs multipass.multipassd`
+# It can mean that some service is listening to port 53 for example.
+
 # multipass snap revisions
+# 1.15.1 => 14535
 # 1.15.0 => 13909
 # 1.14.1 => 13843
 # 1.14.0 => 13332
@@ -50,7 +55,7 @@ write_files:
 - content: |
     #!/bin/sh
     [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
-    [ -n "$2" ] && TARGET="$2" || TARGET="1.28-strict/stable"
+    [ -n "$2" ] && TARGET="$2" || TARGET="1.32-strict/stable"
     USERNAME="$(id -un)"
     rm -rf "/home/$USERNAME/snap/microk8s/"
     rm -rf "/home/$USERNAME/.local/share/microk8s"
@@ -80,6 +85,23 @@ write_files:
     sudo microk8s start
     sudo microk8s config > "/home/$USERNAME/.kube/config"
   path: /usr/local/bin/prepare_microk8s
+  permissions: '0755'
+- content: |
+    #!/bin/sh
+    [ -n "$1" ] && TYPE="$1" || TYPE="CHANNEL"
+    [ -n "$2" ] && TARGET="$2" || TARGET="1.32-classic/stable"
+    USERNAME="$(id -un)"
+    rm -rf "/home/$USERNAME/snap/k8s/"
+    sudo snap remove --purge microk8s
+    sudo snap remove --purge k8s
+    case "$TYPE" in
+      chan*|CHAN*)
+        sudo snap install k8s --channel="$TARGET" --classic;;
+    esac
+    sudo k8s bootstrap --name canonicalk8s
+    sudo k8s enable ingress
+    sudo k8s config > ~/.kube/config
+  path: /usr/local/bin/prepare_canonicalk8s
   permissions: '0755'
 - content: |
     #!/bin/sh
@@ -153,6 +175,22 @@ write_files:
     #!/bin/sh
     sudo -i -u "@USERNAME@" bash -c "cd $1; exec bash"
   path: /usr/local/bin/start
+  permissions: '0755'
+- content: |
+    #!/bin/sh
+    juju unregister --no-prompt lxd
+    juju bootstrap localhost lxd
+    juju model-defaults --cloud=localhost logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    juju add-model machine localhost
+  path: /usr/local/bin/bootstrap_machine
+  permissions: '0755'
+- content: |
+    #!/bin/sh
+    juju unregister --no-prompt k8s
+    juju bootstrap k8s
+    juju model-defaults --cloud=k8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    juju add-model k8s k8s
+  path: /usr/local/bin/bootstrap_k8s
   permissions: '0755'
 
 runcmd:
@@ -235,7 +273,7 @@ if [ "$1" = "expose" ]; then
   cat "$SHARE_DIR/sshkey.pub" >> "$HOME/.ssh/authorized_keys"
   cade_ip="$(multipass list | grep "$INSTANCE_NAME" | awk '{print $3}')"
   sudo ssh -N -f -o "StrictHostKeyChecking=accept-new" -M -S "$SHARE_DIR/expose-tunnel" -i "$SHARE_DIR/sshkey" -L "$2:127.0.0.1:$2" -l "$USERNAME" "$cade_ip"
-  echo "listen on $cade_ip:$2"
+  echo "listen on http://$cade_ip:$2"
   exit
 fi
 
