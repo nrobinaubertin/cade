@@ -5,10 +5,11 @@
 # It can mean that some service is listening to port 53 for example.
 
 # multipass snap revisions
-# 1.15.1 => 14535
-# 1.15.0 => 13909
-# 1.14.1 => 13843
-# 1.14.0 => 13332
+# 1.16.0-rc3 => 15145
+# 1.15.1 =====> 14535
+# 1.15.0 =====> 13909
+# 1.14.1 =====> 13843
+# 1.14.0 =====> 13332
 
 MULTIPASS_REVISION="13843"
 INSTANCE_NAME="cade"
@@ -265,7 +266,10 @@ write_files:
 - content: |
     #!/bin/sh
     juju unregister --no-prompt k8s
-    juju bootstrap k8s
+    if command -v k8s >/dev/null; then
+      sudo k8s config | juju add-k8s k8s --client
+    fi
+    juju bootstrap k8s k8s
     juju model-defaults --cloud=k8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
     juju add-model k8s k8s
   path: /usr/local/bin/bootstrap_k8s
