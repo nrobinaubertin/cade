@@ -12,7 +12,7 @@
 # 1.14.1 =====> 13843
 # 1.14.0 =====> 13332
 
-MULTIPASS_REVISION="13843"
+MULTIPASS_REVISION="15591"
 INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
@@ -36,6 +36,7 @@ users:
 packages:
   - curl
   - exfat-fuse  # for appimages
+  - fzf
   - git
   - gnome-keyring
   - iproute2
@@ -273,12 +274,14 @@ write_files:
 - content: |
     #!/bin/sh
     juju unregister --no-prompt k8s
+    cloud="microk8s"
     if command -v k8s >/dev/null; then
+      cloud="k8s"
       sudo k8s config | juju add-k8s k8s --client
     fi
-    juju bootstrap k8s k8s
-    juju model-defaults --cloud=k8s logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
-    juju add-model k8s k8s
+    juju bootstrap "$cloud" k8s
+    juju model-defaults --cloud="$cloud" logging-config='<root>=WARNING;unit=DEBUG;http=TRACE'
+    juju add-model k8s "$cloud"
   path: /usr/local/bin/bootstrap_k8s
   permissions: '0755'
 
