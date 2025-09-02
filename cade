@@ -5,7 +5,8 @@
 # It can mean that some service is listening to port 53 for example.
 
 # multipass snap revisions
-# 1.16.0-rc3 => 15145
+# 1.16.1 =====> 15591
+# 1.16.0 =====> 15216
 # 1.15.1 =====> 14535
 # 1.15.0 =====> 13909
 # 1.14.1 =====> 13843
@@ -101,8 +102,14 @@ write_files:
     esac
     sudo k8s bootstrap --name canonicalk8s
     sudo k8s enable ingress
+    sudo k8s enable load-balancer
     sudo k8s config > ~/.kube/config
     sudo k8s kubectl apply -f /usr/local/registry.yaml
+    IPADDR=$(ip -4 -j route get 2.2.2.2 | jq -r '.[] | .prefsrc')
+    INGRESS_FIRST_ADDR="$(echo "${IPADDR}" | awk -F'.' '{print $1,$2,$3,2}' OFS='.')"
+    INGRESS_LAST_ADDR="$(echo "${IPADDR}" | awk -F'.' '{print $1,$2,$3,255}' OFS='.')"
+    INGRESS_RANGE="${INGRESS_FIRST_ADDR}-${INGRESS_LAST_ADDR}"
+    sudo k8s set load-balancer.cidrs=$INGRESS_RANGE
   path: /usr/local/bin/prepare_canonicalk8s
   permissions: '0755'
 - content: |
