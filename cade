@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# `cannot connect to the multipass socket`
+# ERROR: `cannot connect to the multipass socket`
 # check `sudo snap services` and `sudo snap logs multipass.multipassd`
 # It can mean that some service is listening to port 53 for example.
 
@@ -17,6 +17,11 @@ INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
 LAUNCH_DIR="$(pwd)"
+
+# Use `multipass find` for other images
+# Keeping this one in sync with:
+# https://github.com/canonical/operator-workflows/blob/main/.github/workflows/test.yaml#L85
+UBUNTU_IMAGE="22.04"
 
 LAUNCH_YAML=$(
 cat <<'EOF'
@@ -63,6 +68,8 @@ write_files:
     rm -rf "/home/$USERNAME/snap/microk8s/"
     rm -rf "/home/$USERNAME/.local/share/microk8s"
     sudo snap remove --purge microk8s
+    sudo snap remove --purge k8s
+    sudo rm -rf /run/containerd/
     case "$TYPE" in
       chan*|CHAN*)
         sudo snap install microk8s --channel="$TARGET";;
@@ -97,6 +104,7 @@ write_files:
     rm -rf "/home/$USERNAME/snap/k8s/"
     sudo snap remove --purge microk8s
     sudo snap remove --purge k8s
+    sudo rm -rf /run/containerd/
     case "$TYPE" in
       chan*|CHAN*)
         sudo snap install k8s --channel="$TARGET" --classic;;
@@ -445,7 +453,7 @@ if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; t
   sed -i -e "s|@USERNAME@|$USERNAME|g" "$launch_file"
   echo "Creating the $INSTANCE_NAME instance"
   echo "multipass launch -n '$INSTANCE_NAME' --cloud-init '$launch_file' --cpus 4 --memory 16G --disk 256G"
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 256G || true
+  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 256G "$UBUNTU_IMAGE" || true
   multipass stop "$INSTANCE_NAME"
   rm "$launch_file"
 fi
