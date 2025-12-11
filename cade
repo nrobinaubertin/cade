@@ -1,27 +1,14 @@
 #!/bin/sh
 
-# ERROR: `cannot connect to the multipass socket`
-# check `sudo snap services` and `sudo snap logs multipass.multipassd`
-# It can mean that some service is listening to port 53 for example.
-
-# multipass snap revisions
-# 1.16.1 =====> 15591
-# 1.16.0 =====> 15216
-# 1.15.1 =====> 14535
-# 1.15.0 =====> 13909
-# 1.14.1 =====> 13843
-# 1.14.0 =====> 13332
-
-MULTIPASS_REVISION="15591"
 INSTANCE_NAME="cade"
 SHARE_DIR="$HOME/.local/share/cade"
 USERNAME="$(id -un)"
 LAUNCH_DIR="$(pwd)"
+WAIT_FOR_VM_DURATION="15"
 
-# Use `multipass find` for other images
 # Keeping this one in sync with:
 # https://github.com/canonical/operator-workflows/blob/main/.github/workflows/test.yaml#L85
-UBUNTU_IMAGE="22.04"
+UBUNTU_IMAGE="ubuntu:24.04"
 
 LAUNCH_YAML=$(
 cat <<'EOF'
@@ -368,10 +355,10 @@ if [ "$1" = "expose" ]; then
   fi
   cade unexpose
   mkdir -p "$SHARE_DIR"
-  [ -f "$SHARE_DIR"/sshkey ] || ssh-keygen -N "" -t ed25519 -C "cade-multipass-$(date -I)" -f "$SHARE_DIR/sshkey"
-  sed -i '/cade-multipass/d' "$HOME/.ssh/authorized_keys"
+  [ -f "$SHARE_DIR"/sshkey ] || ssh-keygen -N "" -t ed25519 -C "cade-lxd-$(date -I)" -f "$SHARE_DIR/sshkey"
+  sed -i '/cade-lxd/d' "$HOME/.ssh/authorized_keys"
   cat "$SHARE_DIR/sshkey.pub" >> "$HOME/.ssh/authorized_keys"
-  cade_ip="$(multipass list | grep "$INSTANCE_NAME" | awk '{print $3}')"
+  cade_ip="$(lxc list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
   sudo ssh -N -f -o "StrictHostKeyChecking=accept-new" -M -S "$SHARE_DIR/expose-tunnel" -i "$SHARE_DIR/sshkey" -L "$2:127.0.0.1:$2" -l "$USERNAME" "$cade_ip"
   echo "listen on http://$cade_ip:$2"
   exit
@@ -379,7 +366,7 @@ fi
 
 if [ "$1" = "unexpose" ]; then
   if [ -S "$SHARE_DIR/expose-tunnel" ]; then
-    cade_ip="$(multipass list | grep "$INSTANCE_NAME" | awk '{print $3}')"
+    cade_ip="$(lxc list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
     sudo ssh -S "$SHARE_DIR/expose-tunnel" -O exit "$cade_ip"
   fi
   exit
@@ -389,34 +376,23 @@ if [ "$1" = "clean" ]; then
   printf 'Are you sure (y/N)? '
   read -r answer
   if [ "$answer" != "${answer#[Yy]}" ] ;then
-    if multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
-      multipass delete "$INSTANCE_NAME"
-      multipass purge
+    if lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
+      lxc delete "$INSTANCE_NAME" --force
     fi
-    sed -i '/cade-multipass/d' "$HOME/.ssh/authorized_keys"
+    sed -i '/cade-lxd/d' "$HOME/.ssh/authorized_keys"
     rm -rf "$SHARE_DIR"
   fi
   exit
 fi
 
 if [ "$1" = "stop" ]; then
-  multipass stop "$INSTANCE_NAME"
-  exit
-fi
-
-if [ "$1" = "prepare" ]; then
-  multipass stop "$INSTANCE_NAME"
-  sudo snap remove multipass --purge
-  # We install a fixed version of multipass to avoid surprises
-  sudo snap install multipass --revision=$MULTIPASS_REVISION
-  # We need to hold the version to avoid auto-updates
-  sudo snap refresh --hold multipass
+  lxc stop "$INSTANCE_NAME"
   exit
 fi
 
 if [ -n "$1" ]; then
   cat << 'EOF'
-Cade: A tool for setting up a charm development environment using Multipass.
+Cade: A tool for setting up a charm development environment using LXD.
 
 Usage:
   cade expose <port>
@@ -441,29 +417,62 @@ EOF
   exit
 fi
 
-if ! multipass list | grep -v "Deleted" | grep "^$INSTANCE_NAME " > /dev/null; then
+if ! lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
   echo "Creating instance"
-  # We're purging to remove the instance if it was deleted
-  multipass purge
-  echo "Deleted instances purged"
-  # We're creating the temporary file in $HOME to be sure 
-  # that multipass as a snap can read it
-  launch_file="$(mktemp -p "$HOME")"
+  # Create the temporary cloud-init file
+  launch_file="$(mktemp)"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|$USERNAME|g" "$launch_file"
   echo "Creating the $INSTANCE_NAME instance"
-  echo "multipass launch -n '$INSTANCE_NAME' --cloud-init '$launch_file' --cpus 4 --memory 16G --disk 256G"
-  multipass launch -n "$INSTANCE_NAME" --cloud-init "$launch_file" --cpus 4 --memory 16G --disk 256G "$UBUNTU_IMAGE" || true
-  multipass stop "$INSTANCE_NAME"
+  echo "lxc launch $UBUNTU_IMAGE $INSTANCE_NAME --vm -c limits.cpu=4 -c limits.memory=16GiB -c limits.memory.swap=false --config=user.user-data=\"\$(cat $launch_file)\""
+
+  # Launch the LXD VM with cloud-init
+  lxc launch "$UBUNTU_IMAGE" "$INSTANCE_NAME" --vm \
+    -c limits.cpu=4 \
+    -c limits.memory=16GiB \
+    --device root,size=256GiB \
+    --config=user.user-data="$(cat "$launch_file")" || true
+
+  # -c limits.memory.swap=false \ not supported
+
+  # Configure root disk size after creation
+  # lxc config device set "$INSTANCE_NAME" root size=256GiB || true
+
+  # Wait a bit for the VM creation
+  sleep "$WAIT_FOR_VM_DURATION"
+
+  # Wait for cloud-init to complete
+  echo "Waiting for cloud-init to complete..."
+  lxc exec "$INSTANCE_NAME" -- cloud-init status --wait || true
+
+  # Stop the instance after cloud-init completes
+  lxc stop "$INSTANCE_NAME"
+
   rm "$launch_file"
 fi
 
 echo "Start $INSTANCE_NAME"
 
-multipass mount -g "$(id -g):1000" -u "$(id -u):1000" --type native ~ "$INSTANCE_NAME:/home/$USERNAME" 2>/dev/null || true
-multipass start "$INSTANCE_NAME" || true
+# Check if instance is already running
+instance_state="$(lxc list "$INSTANCE_NAME" --format csv --columns s)"
+
+# Start the instance if not running
+if [ "$instance_state" != "RUNNING" ]; then
+  lxc start "$INSTANCE_NAME" || true
+  # Wait for the instance to be ready after starting
+  sleep "$WAIT_FOR_VM_DURATION"
+fi
+
+# Add home directory mount if not already present
+if ! lxc config device show "$INSTANCE_NAME" | grep -q "homedir"; then
+  echo "Adding home directory mount"
+  lxc config device add "$INSTANCE_NAME" homedir disk \
+    source="$HOME" \
+    path="/home/$USERNAME" \
+    shift=true || true
+fi
 
 # launching a shell with the correct user inside the VM to the right path
 echo "$LAUNCH_DIR"
 set -xe
-multipass exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
+lxc exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
