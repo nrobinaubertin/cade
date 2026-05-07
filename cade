@@ -6,6 +6,13 @@ USERNAME="$(id -un)"
 LAUNCH_DIR="$(pwd)"
 WAIT_FOR_VM_DURATION="15"
 
+# Desired VM CPU count, capped to available host CPUs
+HOST_CPUS="$(nproc 2>/dev/null || echo 1)"
+VM_CPUS=2
+if [ "$HOST_CPUS" -lt "$VM_CPUS" ]; then
+  VM_CPUS="$HOST_CPUS"
+fi
+
 # Keeping this one in sync with:
 # https://github.com/canonical/operator-workflows/blob/main/.github/workflows/test.yaml#L85
 UBUNTU_IMAGE="ubuntu:24.04"
@@ -43,8 +50,9 @@ packages:
 snap:
   commands:
     - snap install charmcraft --classic --channel=latest/stable
-    - snap install rockcraft --classic --channel=latest/stable
     - snap install jhack --channel=latest/stable
+    - snap install rockcraft --classic --channel=latest/stable
+    - snap install terraform --channel=latest/stable
 
 write_files:
 - content: |
@@ -424,41 +432,66 @@ if ! lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|$USERNAME|g" "$launch_file"
   echo "Creating the $INSTANCE_NAME instance"
-  echo "lxc launch $UBUNTU_IMAGE $INSTANCE_NAME --vm -c limits.cpu=4 -c limits.memory=16GiB -c limits.memory.swap=false --config=user.user-data=\"\$(cat $launch_file)\""
+  echo "lxc launch $UBUNTU_IMAGE $INSTANCE_NAME --vm -c limits.cpu=$VM_CPUS -c limits.memory=16GiB --device root,size=256GiB --config=user.user-data=\"\$(cat $launch_file)\""
 
   # Launch the LXD VM with cloud-init
-  lxc launch "$UBUNTU_IMAGE" "$INSTANCE_NAME" --vm \
-    -c limits.cpu=4 \
+  if ! lxc launch "$UBUNTU_IMAGE" "$INSTANCE_NAME" --vm \
+    -c limits.cpu="$VM_CPUS" \
     -c limits.memory=16GiB \
     --device root,size=256GiB \
-    --config=user.user-data="$(cat "$launch_file")" || true
-
-  # -c limits.memory.swap=false \ not supported
-
-  # Configure root disk size after creation
-  # lxc config device set "$INSTANCE_NAME" root size=256GiB || true
+    --config=user.user-data="$(cat "$launch_file")"; then
+    echo "Error: Failed to create the $INSTANCE_NAME instance."
+    echo "Try 'cade clean' to remove any partial state, then retry."
+    # Clean up partial instance if it was created
+    if lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
+      lxc delete "$INSTANCE_NAME" --force
+    fi
+    rm "$launch_file"
+    exit 1
+  fi
 
   # Wait a bit for the VM creation
   sleep "$WAIT_FOR_VM_DURATION"
 
   # Wait for cloud-init to complete
   echo "Waiting for cloud-init to complete..."
-  lxc exec "$INSTANCE_NAME" -- cloud-init status --wait || true
+  if ! lxc exec "$INSTANCE_NAME" -- cloud-init status --wait; then
+    echo "Warning: cloud-init did not complete successfully."
+    echo "The instance may not be fully configured."
+  fi
 
   # Stop the instance after cloud-init completes
-  lxc stop "$INSTANCE_NAME"
+  if ! lxc stop "$INSTANCE_NAME" --timeout=60; then
+    echo "Graceful stop timed out, forcing stop..."
+    lxc stop "$INSTANCE_NAME" --force
+  fi
+
+  # Wait for the instance to actually be stopped
+  echo "Waiting for $INSTANCE_NAME to stop..."
+  while [ "$(lxc list "$INSTANCE_NAME" --format csv --columns s)" != "STOPPED" ]; do
+    sleep 2
+  done
 
   rm "$launch_file"
 fi
 
 echo "Start $INSTANCE_NAME"
 
-# Check if instance is already running
+# Wait for any pending operations to complete before checking state
 instance_state="$(lxc list "$INSTANCE_NAME" --format csv --columns s)"
+while [ "$instance_state" != "STOPPED" ] && [ "$instance_state" != "RUNNING" ]; do
+  sleep 2
+  instance_state="$(lxc list "$INSTANCE_NAME" --format csv --columns s)"
+done
 
 # Start the instance if not running
 if [ "$instance_state" != "RUNNING" ]; then
-  lxc start "$INSTANCE_NAME" || true
+  if ! lxc start "$INSTANCE_NAME"; then
+    echo "Error: Failed to start the $INSTANCE_NAME instance."
+    echo "Try 'lxc info --show-log $INSTANCE_NAME' for more details."
+    echo "You may need to run 'cade clean' and recreate the instance."
+    exit 1
+  fi
   # Wait for the instance to be ready after starting
   sleep "$WAIT_FOR_VM_DURATION"
 fi
@@ -466,10 +499,14 @@ fi
 # Add home directory mount if not already present
 if ! lxc config device show "$INSTANCE_NAME" | grep -q "homedir"; then
   echo "Adding home directory mount"
-  lxc config device add "$INSTANCE_NAME" homedir disk \
+  if ! lxc config device add "$INSTANCE_NAME" homedir disk \
     source="$HOME" \
     path="/home/$USERNAME" \
-    shift=true || true
+    shift=true; then
+    echo "Error: Failed to add home directory mount."
+    echo "Try stopping the instance with 'cade stop' and running 'cade' again."
+    exit 1
+  fi
 fi
 
 # launching a shell with the correct user inside the VM to the right path
