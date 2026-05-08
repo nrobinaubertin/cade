@@ -363,10 +363,10 @@ if [ "$1" = "expose" ]; then
   fi
   cade unexpose
   mkdir -p "$SHARE_DIR"
-  [ -f "$SHARE_DIR"/sshkey ] || ssh-keygen -N "" -t ed25519 -C "cade-lxd-$(date -I)" -f "$SHARE_DIR/sshkey"
-  sed -i '/cade-lxd/d' "$HOME/.ssh/authorized_keys"
+  [ -f "$SHARE_DIR"/sshkey ] || ssh-keygen -N "" -t ed25519 -C "cade-incus-$(date -I)" -f "$SHARE_DIR/sshkey"
+  sed -i '/cade-incus/d' "$HOME/.ssh/authorized_keys"
   cat "$SHARE_DIR/sshkey.pub" >> "$HOME/.ssh/authorized_keys"
-  cade_ip="$(lxc list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
+  cade_ip="$(incus list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
   sudo ssh -N -f -o "StrictHostKeyChecking=accept-new" -M -S "$SHARE_DIR/expose-tunnel" -i "$SHARE_DIR/sshkey" -L "$2:127.0.0.1:$2" -l "$USERNAME" "$cade_ip"
   echo "listen on http://$cade_ip:$2"
   exit
@@ -374,7 +374,7 @@ fi
 
 if [ "$1" = "unexpose" ]; then
   if [ -S "$SHARE_DIR/expose-tunnel" ]; then
-    cade_ip="$(lxc list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
+    cade_ip="$(incus list "$INSTANCE_NAME" --format csv --columns 4 | head -n1 | cut -d' ' -f1)"
     sudo ssh -S "$SHARE_DIR/expose-tunnel" -O exit "$cade_ip"
   fi
   exit
@@ -384,23 +384,23 @@ if [ "$1" = "clean" ]; then
   printf 'Are you sure (y/N)? '
   read -r answer
   if [ "$answer" != "${answer#[Yy]}" ] ;then
-    if lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
-      lxc delete "$INSTANCE_NAME" --force
+    if incus list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
+      incus delete "$INSTANCE_NAME" --force
     fi
-    sed -i '/cade-lxd/d' "$HOME/.ssh/authorized_keys"
+    sed -i '/cade-incus/d' "$HOME/.ssh/authorized_keys"
     rm -rf "$SHARE_DIR"
   fi
   exit
 fi
 
 if [ "$1" = "stop" ]; then
-  lxc stop "$INSTANCE_NAME"
+  incus stop "$INSTANCE_NAME"
   exit
 fi
 
 if [ -n "$1" ]; then
   cat << 'EOF'
-Cade: A tool for setting up a charm development environment using LXD.
+Cade: A tool for setting up a charm development environment using incus.
 
 Usage:
   cade expose <port>
@@ -425,17 +425,17 @@ EOF
   exit
 fi
 
-if ! lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
+if ! incus list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
   echo "Creating instance"
   # Create the temporary cloud-init file
   launch_file="$(mktemp)"
   echo "$LAUNCH_YAML" > "$launch_file"
   sed -i -e "s|@USERNAME@|$USERNAME|g" "$launch_file"
   echo "Creating the $INSTANCE_NAME instance"
-  echo "lxc launch $UBUNTU_IMAGE $INSTANCE_NAME --vm -c limits.cpu=$VM_CPUS -c limits.memory=16GiB --device root,size=256GiB --config=user.user-data=\"\$(cat $launch_file)\""
+  echo "incus launch $UBUNTU_IMAGE $INSTANCE_NAME --vm -c limits.cpu=$VM_CPUS -c limits.memory=16GiB --device root,size=256GiB --config=user.user-data=\"\$(cat $launch_file)\""
 
-  # Launch the LXD VM with cloud-init
-  if ! lxc launch "$UBUNTU_IMAGE" "$INSTANCE_NAME" --vm \
+  # Launch the incus VM with cloud-init
+  if ! incus launch "$UBUNTU_IMAGE" "$INSTANCE_NAME" --vm \
     -c limits.cpu="$VM_CPUS" \
     -c limits.memory=16GiB \
     --device root,size=256GiB \
@@ -443,8 +443,8 @@ if ! lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
     echo "Error: Failed to create the $INSTANCE_NAME instance."
     echo "Try 'cade clean' to remove any partial state, then retry."
     # Clean up partial instance if it was created
-    if lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
-      lxc delete "$INSTANCE_NAME" --force
+    if incus list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
+      incus delete "$INSTANCE_NAME" --force
     fi
     rm "$launch_file"
     exit 1
@@ -455,20 +455,20 @@ if ! lxc list --format csv --columns n | grep -q "^$INSTANCE_NAME$"; then
 
   # Wait for cloud-init to complete
   echo "Waiting for cloud-init to complete..."
-  if ! lxc exec "$INSTANCE_NAME" -- cloud-init status --wait; then
+  if ! incus exec "$INSTANCE_NAME" -- cloud-init status --wait; then
     echo "Warning: cloud-init did not complete successfully."
     echo "The instance may not be fully configured."
   fi
 
   # Stop the instance after cloud-init completes
-  if ! lxc stop "$INSTANCE_NAME" --timeout=60; then
+  if ! incus stop "$INSTANCE_NAME" --timeout=60; then
     echo "Graceful stop timed out, forcing stop..."
-    lxc stop "$INSTANCE_NAME" --force
+    incus stop "$INSTANCE_NAME" --force
   fi
 
   # Wait for the instance to actually be stopped
   echo "Waiting for $INSTANCE_NAME to stop..."
-  while [ "$(lxc list "$INSTANCE_NAME" --format csv --columns s)" != "STOPPED" ]; do
+  while [ "$(incus list "$INSTANCE_NAME" --format csv --columns s)" != "STOPPED" ]; do
     sleep 2
   done
 
@@ -478,17 +478,17 @@ fi
 echo "Start $INSTANCE_NAME"
 
 # Wait for any pending operations to complete before checking state
-instance_state="$(lxc list "$INSTANCE_NAME" --format csv --columns s)"
+instance_state="$(incus list "$INSTANCE_NAME" --format csv --columns s)"
 while [ "$instance_state" != "STOPPED" ] && [ "$instance_state" != "RUNNING" ]; do
   sleep 2
-  instance_state="$(lxc list "$INSTANCE_NAME" --format csv --columns s)"
+  instance_state="$(incus list "$INSTANCE_NAME" --format csv --columns s)"
 done
 
 # Start the instance if not running
 if [ "$instance_state" != "RUNNING" ]; then
-  if ! lxc start "$INSTANCE_NAME"; then
+  if ! incus start "$INSTANCE_NAME"; then
     echo "Error: Failed to start the $INSTANCE_NAME instance."
-    echo "Try 'lxc info --show-log $INSTANCE_NAME' for more details."
+    echo "Try 'incus info --show-log $INSTANCE_NAME' for more details."
     echo "You may need to run 'cade clean' and recreate the instance."
     exit 1
   fi
@@ -497,9 +497,9 @@ if [ "$instance_state" != "RUNNING" ]; then
 fi
 
 # Add home directory mount if not already present
-if ! lxc config device show "$INSTANCE_NAME" | grep -q "homedir"; then
+if ! incus config device show "$INSTANCE_NAME" | grep -q "homedir"; then
   echo "Adding home directory mount"
-  if ! lxc config device add "$INSTANCE_NAME" homedir disk \
+  if ! incus config device add "$INSTANCE_NAME" homedir disk \
     source="$HOME" \
     path="/home/$USERNAME" \
     shift=true; then
@@ -512,4 +512,4 @@ fi
 # launching a shell with the correct user inside the VM to the right path
 echo "$LAUNCH_DIR"
 set -xe
-lxc exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
+incus exec "$INSTANCE_NAME" -- sudo -i -u "$USERNAME" start "$LAUNCH_DIR"
